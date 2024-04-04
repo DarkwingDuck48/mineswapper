@@ -1,0 +1,291 @@
+﻿/// <summary>
+/// Created by Maxim Britvin
+/// Зачем нужно это упражнение:
+/// 1. Показывает как можно вызвать событие в родительской форме из дочернего объекта - CheckMine в классе FieldTile
+/// 2. Показывает как можно реализовать динамическое создание элементов на форме
+/// 3. Показывает как можно использовать наследование от классов Форсайта
+/// 4. Если не вызывать функцию по закрытию формы - становится примером демонстрирующим утечку памяти в Форсайте
+/// </summary>
+
+Const MINE = "💣";
+Const ROWS = 10;
+Const COLUMNS = 10;
+Const MINES_COUNT = 30;
+Const BUTTON_WIDTH = 40;
+Const BUTTON_HEIGHT = 40;
+Const BUTTON_MARGIN = 2;
+
+/// <summary>
+/// Класс-помощник для обработки координат
+/// </summary>
+Class ButtonCoords: Object
+	_row: Integer;
+	_col: Integer;
+	
+	Public Constructor Create(row: Integer; col: Integer);
+	Begin
+		_row := row;
+		_col := col;
+	End Constructor Create;
+	
+	Public Function Up: ButtonCoords;
+	Begin
+		Return New ButtonCoords.Create(Self._row - 1, Self._col);
+	End Function Up;
+	
+	Public Function Down: ButtonCoords;
+	Begin
+		Return New ButtonCoords.Create(Self._row + 1, Self._col);
+	End Function Down;
+	
+	Public Function Left: ButtonCoords;
+	Begin
+		Return New ButtonCoords.Create(Self._row, Self._col - 1);
+	End Function Left;
+	
+	Public Function Right: ButtonCoords;
+	Begin
+		Return New ButtonCoords.Create(Self._row, Self._col + 1);
+	End Function Right;
+	
+	
+	Public Property Row: Integer
+		Get
+		Begin
+			Return _row
+		End Get
+	End Property Row;
+	
+	Public Property Column: Integer
+		Get
+		Begin
+			Return _col
+		End Get
+	End Property Column;
+	
+End Class ButtonCoords;
+
+
+/// <summary>
+/// Одна ячейка на поле
+/// </summary>
+Class FieldTile: PPButton
+	
+	_is_mine: Boolean;
+	_but_index: Integer;
+	_coords: ButtonCoords;
+	
+	Public Constructor Create(but_index: Integer; row: Integer; column: Integer);
+	Begin
+		Inherited Create;
+		_but_index := but_index;
+		_coords := New ButtonCoords.Create(row, column);
+		Self.Width := BUTTON_WIDTH;
+		Self.Height := BUTTON_HEIGHT;
+		Self.Left := 5 + (BUTTON_WIDTH + BUTTON_MARGIN) * column;
+		self.Top := 5 + (BUTTON_HEIGHT + BUTTON_MARGIN) * row + 40;
+		self.OnClick := CheckMine;
+		self.Text := " ";
+		self.Align
+	End Constructor Create;
+	
+	Public Property IsMine: Boolean
+		Get
+		Begin
+			Return _is_mine
+		End Get
+	End Property IsMine;
+
+	Public Sub PlantMine;
+	Begin
+		Self._is_mine := True;
+	End Sub PlantMine;
+
+	Public Sub ShowMine;
+	Begin
+		If _is_mine Then
+			self.Text := MINE;
+		End If;
+		self.Enabled := False;
+	End Sub ShowMine;
+
+	Private Sub CheckMine(Sender: Object; Args: IMouseEventArgs);
+	Var
+		resultCheck: Integer;
+	Begin
+		If self._is_mine Then
+			(Self.Parent As IFormControl).SendCommand("FindBomb");
+		Else
+			resultCheck := (Self.Parent As IFormControl).SendCommand("CheckNeighbours", self._coords) As Integer;
+			Self.Text := resultCheck = 0 ? "" : resultCheck.ToString;
+			self.Enabled := False;
+		End If;
+	End Sub CheckMine;
+End Class FieldTile;
+
+// Игровое поле
+Class DEV_MINESWEEPERForm: Form
+	
+	MB: IMetabase;
+	logonSession: ILogonSession;
+	game_button: FieldTile;
+	PlayGround: IArrayList;
+	MinesTiles: IList;
+	NewGame: PPButton;
+	
+	Sub DEV_MINESWEEPERFormOnCreate(Sender: Object; Args: IEventArgs);
+	Var
+		mines_positions: IList;
+	Begin
+		self.Width := (COLUMNS * BUTTON_WIDTH) + (BUTTON_MARGIN * COLUMNS * 2) + 15;
+		self.Height := (ROWS * BUTTON_HEIGHT) + (BUTTON_MARGIN * ROWS * 2) + 100;
+		mines_positions := New ArrayList.Create;
+		Self.PlayGround := New ArrayList.Create;
+		If MINES_COUNT >= ROWS * COLUMNS Then
+			Raise New Exception.Create("Can't place " + MINES_COUNT.ToString + "mines to field " + ROWS.ToString + " x " + COLUMNS.ToString);
+
+		End If;
+		Debug.WriteLine("Start");
+		NewGame := New PPButton.Create;
+		NewGame.Parent := Self;
+		NewGame.Text := "Новая игра";
+		NewGame.Top := 15;
+		NewGame.Width := 100;
+		NewGame.Left := (self.Width Div 2) - 60;
+		NewGame.OnClick := NewGameButton_OnClick;
+		mines_positions := Self.GenerateMines;
+		Self.PlayGround := Self.CreatePlayground(mines_positions);
+		
+	End Sub DEV_MINESWEEPERFormOnCreate;
+
+	Private Function CreatePlayground(minesList: IList): IArrayList;
+	Var
+		butt_index_rows: Integer;
+		butt_index_cols: Integer;
+		button_index: Integer;
+		game_button: FieldTile;
+		playground: IArrayList;
+		field_row: IArrayList;
+	Begin
+		// Создание поля для игры
+		playground := New ArrayList.Create;
+		For butt_index_rows := 0 To ROWS - 1 Do
+			field_row := New ArrayList.Create;
+			For butt_index_cols := 0 To COLUMNS - 1 Do
+				button_index := butt_index_rows * ROWS + butt_index_cols + 1;
+				game_button := New FieldTile.Create(button_index, butt_index_rows, butt_index_cols);
+				game_button.Parent := Self;
+				If minesList.Contains(button_index) Then
+					game_button.PlantMine;
+				End If;
+				field_row.Add(game_button);
+			End For;
+			playground.Add(field_row);
+		End For;
+		Return playground;
+	End Function CreatePlayground;
+
+	Private Function GenerateMines: IList;
+	Var
+		minesList: IList;
+		mine_position: Integer;
+	Begin
+		// Генерация мин
+		minesList := New ArrayList.Create;
+		While minesList.Count < MINES_COUNT Do
+			mine_position := Double.CeilingInt(Math.RandBetween(0, ROWS * COLUMNS));
+			If Not minesList.Contains(mine_position) Then
+				minesList.Add(mine_position)
+			End If;
+		End While;
+		Return minesList
+	End Function GenerateMines;
+
+
+	Public Sub NewGameButton_OnClick(Sender: Object; Args: IMouseEventArgs);
+	Begin
+		CreateNewGame;
+	End Sub NewGameButton_OnClick;
+
+	Private Sub CreateNewGame;
+	Var
+		mines_positions: IList;
+	Begin
+		self.PlayGround.Clear;
+		mines_positions := New ArrayList.Create;
+		mines_positions := Self.GenerateMines;
+		Self.PlayGround := Self.CreatePlayground(mines_positions);
+	End Sub CreateNewGame;
+	
+	
+	Private Sub ShowAllBombs;
+	Var
+		row: IArrayList;
+		tile: FieldTile;
+	Begin
+		For Each row In Self.PlayGround Do
+			For Each tile In row Do
+				tile.ShowMine;
+			End For;
+		End For;
+	End Sub ShowAllBombs;
+
+	Private Function IsValidCoord(coord: ButtonCoords): Boolean;
+	Begin
+		Return Not ((coord.Row < 0) Or (coord.Column < 0) Or (coord.Row >= ROWS) Or (coord.Column >= COLUMNS));
+	End Function IsValidCoord;
+
+	Private Function IsBombHere(coord: ButtonCoords): Integer;
+	/// <summary>
+	/// Возвращаем 1, если есть бомба и 0 если нет
+	/// </summary>
+	Var
+		checked_row: IArrayList;
+		checked_tile: FieldTile;
+	Begin
+		If IsValidCoord(coord) Then
+			checked_row := Self.PlayGround.Item(coord.Row);
+			checked_tile := checked_row.Item(coord.Column);
+			If checked_tile.IsMine Then
+				Return 1;
+			End If;
+		End If;
+		Return 0;
+	End Function IsBombHere;
+
+	Public Function CheckNeighbours(coord: ButtonCoords): Integer;
+	/// <summary>
+	/// Строим соседей и проверяем их. Возвращаем количество соседних бомб
+	/// </summary>
+	Var
+		click_row: Integer;
+		click_col: Integer;
+		result: Integer;
+	Begin
+		click_row := coord.Row;
+		click_col := coord.Column;
+		result := 0;
+		result := IsBombHere(coord.Up) + IsBombHere(coord.Down) + IsBombHere(coord.Left) + IsBombHere(coord.Right);
+		result := result + IsBombHere(coord.Up.Left) + IsBombHere(coord.Up.Right);
+		result := result + IsBombHere(coord.Down.Left) + IsBombHere(coord.Down.Right);
+		Return result;
+	End Function CheckNeighbours;
+
+	Sub DEV_MINESWEEPERFormOnCommand(Sender: Object; Args: ICommandEventArgs);
+	Begin
+		If Args.Command = "CheckNeighbours" Then
+			Args.Result := CheckNeighbours(Args.Argument);
+		Elseif Args.Command = "FindBomb" Then
+			ShowAllBombs;
+		End If;
+		
+	End Sub DEV_MINESWEEPERFormOnCommand;
+
+	Sub DEV_MINESWEEPERFormOnClose(Sender: Object; Args: IEventArgs);
+	Begin
+		self.PlayGround.Clear;
+		Dispose Self.PlayGround;
+	
+	End Sub DEV_MINESWEEPERFormOnClose;
+
+End Class DEV_MINESWEEPERForm;
